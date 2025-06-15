@@ -3,7 +3,7 @@ TODO:
 - Add Deep Learning Section to Intro
 - Add Note book
 - Change Notebook URL
-- Add Code
+
 
 # Who would win? A State Of The Art Foundation Model or a Neural Net?
 
