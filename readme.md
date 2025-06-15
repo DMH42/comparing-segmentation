@@ -4,7 +4,6 @@ TODO:
 - Add Note book
 - Change Notebook URL
 
-
 # Who would win? A State Of The Art Foundation Model or a Neural Net?
 
 ### Comparing the performance of Grounded Dino + SAM2 vs Traditional Deep Neural Networks
