@@ -356,7 +356,7 @@ mask_dir = './segmentation_full_body_mads_dataset_1192_img/segmentation_full_bod
 
 ### Dataset Class required for loading images and masks
 
-````python
+```python
 class SegmentationDataset(Dataset):
     def __init__(self, image_paths, mask_paths, transforms=None):
         self.image_paths = image_paths
@@ -377,7 +377,7 @@ class SegmentationDataset(Dataset):
             mask = augmented['mask'].unsqueeze(0)  # Add channel dimension for mask
 
         return image, mask
-		```
+```
 
 # We use the albumentations library to apply transformations to the images and masks.
 
@@ -394,7 +394,7 @@ val_transform = A.Compose([
     A.Normalize(),
     ToTensorV2()
 ])
-````
+```
 
 # Create datasets and dataloaders using the defined SegmentationDataset class
 
@@ -441,7 +441,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 # Just Like before we define a function to calculate the IoU score
 
-````python
+```python
 def iou_score(preds, targets, threshold=0.5):
     predicted_mask = torch.sigmoid(preds) > threshold
     predicted_mask = predicted_mask.bool()
@@ -451,7 +451,7 @@ def iou_score(preds, targets, threshold=0.5):
     union = (predicted_mask | true_mask).sum(dim=(1, 2, 3))
     iou = (intersection + 1e-6) / (union + 1e-6)
     return iou.mean().item()
-	```
+```
 
 # We simplify the training and evaluation process by defining two functions: one for training for one epoch and another for evaluating the model.
 
@@ -468,8 +468,10 @@ def train_one_epoch(model, loader, optimizer, criterion):
         optimizer.step()
         total_loss += loss.item()
     return total_loss / len(loader)
-	```
+```
+
 # We define the evaluation function that calculates the IoU score for the validation set.
+
 ```python
 def evaluate(model, loader):
     model.eval()
@@ -480,9 +482,10 @@ def evaluate(model, loader):
             preds = model(imgs)
             total_iou += iou_score(preds, masks)
     return total_iou / len(loader)
-	```
+```
 
 # Now we can train the model for a specified number of epochs and evaluate it on the validation set.
+
 ```python
 epochs = 20
 train_losses = []
@@ -493,7 +496,8 @@ for epoch in range(epochs):
     train_losses.append(train_loss)
     val_ious.append(val_iou)
     print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.4f} | Val IoU: {val_iou:.4f}")
-	```
+```
+
 # Final Score: 0.9208
 
 We were able to obtain a final score of **0.9208** which is a very good performance for a model that was trained on a relatively small dataset. This is a good example of how traditional deep learning approaches can still be very effective for image segmentation tasks, especially when we have enough data to train on.
@@ -522,7 +526,7 @@ class DoubleConv(nn.Module):
 
     def forward(self, x):
         return self.double_conv(x)
-		```
+```
 
 ```python
 class UNet(nn.Module):
@@ -556,7 +560,7 @@ class UNet(nn.Module):
         self.dec1 = DoubleConv(128, 64)
 
         self.final_conv = nn.Conv2d(64, out_channels, kernel_size=1)
-		```
+```
 
 ```python
 def forward(self, x):
@@ -584,22 +588,18 @@ def forward(self, x):
         dec1 = self.dec1(up1)
 
         return self.final_conv(dec1)
-		```
-
-
+```
 
 # When to choose Foundation Models vs Traditional Deep Learning?
+
 In general, if you have a lot of data and the task is well defined then it is often the case that a traditional deep learning approach will yield better results. However, if you do not have enough data or the task is not well defined then it is often the case that a foundation model will be able to give you better results.
 
 Another factor to consider is the time and resources you have available. If you need to get results quickly and do not have the resources to train a model from scratch then a foundation model is often the best choice. However, if you have the time and resources to train a model from scratch then a traditional deep learning approach will often yield better results.
 
 Finally if you are developing a production system you have to think of the inference time and the resources that you have available. Foundation models are often very large and require a lot of resources to run, which can make them impractical for production systems. In this case, a traditional deep learning approach is often the best choice.
 
-
-
 ## Conclusion
 
 Through this walkthrough you now have now seen how to do Zero Shot Image Segmentation through the usage of the SAM2 model and the GroundedDino model. Not only that but we also explored the potential ways to explore the data and then be able to increase the performance by figuring what are the problems that your implementation has along the way. This is because in the field of ML it is not always the case that you will get the best results form the beginning and as you need to iteratively improve the performance as you find ways of fixing the problems your implementation faces.
 
 Thank you!
-````
