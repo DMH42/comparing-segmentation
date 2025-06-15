@@ -1,4 +1,5 @@
 TODO:
+
 - Add Deep Learning Section to Intro
 - Add Note book
 - Change Notebook URL
@@ -17,13 +18,13 @@ In this article we will discuss the usage of Foundation Models for the task of i
 #### Introduction:
 
 **What is Image Segmentation?**
-To put it simply image segmentation is a task where we identify an object in an image and then we trace the boundary around an object. If you use stickers on an [iPhone](https://support.apple.com/guide/iphone/make-stickers-from-your-photos-iph9b4106303/ios) or on WhatsApp then you are already familar with the task of Image Segementation! 
+To put it simply image segmentation is a task where we identify an object in an image and then we trace the boundary around an object. If you use stickers on an [iPhone](https://support.apple.com/guide/iphone/make-stickers-from-your-photos-iph9b4106303/ios) or on WhatsApp then you are already familar with the task of Image Segementation!
 
 **The State of The Art**
 
 The rise of the [transformer](https://arxiv.org/pdf/1706.03762) architecture has ushered in a drastic change in the machine learning space. One of the trends that we have been observing is the implementation of the transformer architecture into a plethora of domains. An example of one of this increased prevalence of the transformer architecture is the [Segment Anything Model](https://arxiv.org/pdf/2304.02643) by Meta.
 
-The newest version [SAM2](https://arxiv.org/pdf/2408.00714) has increased performance and capabilities, this is due to the fact that Meta and other similar companies are able to train these models with vast quantities of data, more than what an individual would be able to do on their own computer. 
+The newest version [SAM2](https://arxiv.org/pdf/2408.00714) has increased performance and capabilities, this is due to the fact that Meta and other similar companies are able to train these models with vast quantities of data, more than what an individual would be able to do on their own computer.
 
 However, one of the shortcomings of this model is that it does not have the capability to receive a text prompt to then segment those objects from the image or video. The reason for this is that the SAM models require a recommendation in the form of a point or a bounding box to be able to then make their segmentation inference.
 
@@ -42,6 +43,7 @@ For this article we will be using [this](https://www.kaggle.com/datasets/tapakah
 ## Foundation Model Section
 
 Why would we use a Foundation Models such as SAM? The are two very straight forward answers to this question:
+
 1. The model is already pre-trained and capable of doing the task meaning that we can get past the hurdle of not having a lot of training data.
 2. It is very easy to get started and be able to produce results.
 
@@ -324,14 +326,280 @@ By implementing this small change on the picking function we are able to boost t
 
 As you've seen it was very straight forward to set up the inference for the model and to start generating results. We needed to do a little bit of debugging in order to boost the performance but it didn't require a lot more effort. This is an example of how foundation models can help increase the productivity of engineering teams by allowing us to ship quickly.
 
-
 ## Traditional Deep Learning
+
 Due to the fact that we have a relatiely large dataset (1k+ images) then it is senisble to try fine tunning a neural network to be able to comapre the results.
 
-In order to train a neural netw
+# TODO
+
+### setting up the libaries
+
+```python
+import os
+import numpy as np
+from PIL import Image
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Dataset, DataLoader
+import torch
+import torch.nn as nn
+import segmentation_models_pytorch as smp
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+```
+
+### File Paths
+
+```python
+image_dir = './segmentation_full_body_mads_dataset_1192_img/segmentation_full_body_mads_dataset_1192_img/images'
+mask_dir = './segmentation_full_body_mads_dataset_1192_img/segmentation_full_body_mads_dataset_1192_img/masks'
+```
+
+### Dataset Class required for loading images and masks
+
+````python
+class SegmentationDataset(Dataset):
+    def __init__(self, image_paths, mask_paths, transforms=None):
+        self.image_paths = image_paths
+        self.mask_paths = mask_paths
+        self.transforms = transforms
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        image = np.array(Image.open(self.image_paths[idx]).convert("RGB"))
+        mask = np.array(Image.open(self.mask_paths[idx]).convert("L"))
+        mask = (mask > 127).astype(np.float32)  # making it a binary mask
+
+        if self.transforms:
+            augmented = self.transforms(image=image, mask=mask)
+            image = augmented['image']
+            mask = augmented['mask'].unsqueeze(0)  # Add channel dimension for mask
+
+        return image, mask
+		```
+
+# We use the albumentations library to apply transformations to the images and masks.
+
+```python
+train_transform = A.Compose([
+    A.Resize(256, 256),
+    A.HorizontalFlip(p=0.5),
+    A.Normalize(),
+    ToTensorV2()
+])
+
+val_transform = A.Compose([
+    A.Resize(256, 256),
+    A.Normalize(),
+    ToTensorV2()
+])
+````
+
+# Create datasets and dataloaders using the defined SegmentationDataset class
+
+```python
+image_files = sorted([os.path.join(image_dir, f) for f in os.listdir(image_dir)])
+mask_files = sorted([os.path.join(mask_dir, f) for f in os.listdir(mask_dir)])
+
+train_imgs, val_imgs, train_masks, val_masks = train_test_split(
+    image_files, mask_files, test_size=0.2, random_state=42
+)
+
+train_dataset = SegmentationDataset(train_imgs, train_masks, transforms=train_transform)
+val_dataset = SegmentationDataset(val_imgs, val_masks, transforms=val_transform)
+
+train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=8)
+```
+
+# we will use a pre-trained Unet model from segmentation_models_pytorch
+
+```python
+model = smp.Unet(
+    encoder_name="resnet34",
+    encoder_weights="imagenet",
+    in_channels=3,
+    classes=1,
+    activation=None  # We'll apply sigmoid manually
+)
+```
+
+# Load the model to the appropriate device (GPU if available)
+
+```python
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
+```
+
+# Define the loss function and optimizer
+
+```python
+criterion = nn.BCEWithLogitsLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+```
+
+# Just Like before we define a function to calculate the IoU score
+
+````python
+def iou_score(preds, targets, threshold=0.5):
+    predicted_mask = torch.sigmoid(preds) > threshold
+    predicted_mask = predicted_mask.bool()
+    true_mask = targets.bool()
+
+    intersection = (predicted_mask & true_mask).sum(dim=(1, 2, 3))
+    union = (predicted_mask | true_mask).sum(dim=(1, 2, 3))
+    iou = (intersection + 1e-6) / (union + 1e-6)
+    return iou.mean().item()
+	```
+
+# We simplify the training and evaluation process by defining two functions: one for training for one epoch and another for evaluating the model.
+
+```python
+def train_one_epoch(model, loader, optimizer, criterion):
+    model.train()
+    total_loss = 0
+    for imgs, masks in loader:
+        imgs, masks = imgs.to(device), masks.to(device)
+        preds = model(imgs)
+        loss = criterion(preds, masks)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    return total_loss / len(loader)
+	```
+# We define the evaluation function that calculates the IoU score for the validation set.
+```python
+def evaluate(model, loader):
+    model.eval()
+    total_iou = 0
+    with torch.no_grad():
+        for imgs, masks in loader:
+            imgs, masks = imgs.to(device), masks.to(device)
+            preds = model(imgs)
+            total_iou += iou_score(preds, masks)
+    return total_iou / len(loader)
+	```
+
+# Now we can train the model for a specified number of epochs and evaluate it on the validation set.
+```python
+epochs = 20
+train_losses = []
+val_ious = []
+for epoch in range(epochs):
+    train_loss = train_one_epoch(model, train_loader, optimizer, criterion)
+    val_iou = evaluate(model, val_loader)
+    train_losses.append(train_loss)
+    val_ious.append(val_iou)
+    print(f"Epoch {epoch+1}/{epochs} | Train Loss: {train_loss:.4f} | Val IoU: {val_iou:.4f}")
+	```
+# Final Score: 0.9208
+
+We were able to obtain a final score of **0.9208** which is a very good performance for a model that was trained on a relatively small dataset. This is a good example of how traditional deep learning approaches can still be very effective for image segmentation tasks, especially when we have enough data to train on.
+
+# Now lets consider an even simpler model, a regular UNet
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class DoubleConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            # dropout
+            nn.Dropout2d(0.2),
+            nn.Conv2d(out_channels, out_channels, 3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+		```
+
+```python
+class UNet(nn.Module):
+    def __init__(self, in_channels=3, out_channels=1):
+        super().__init__()
+
+        self.down1 = DoubleConv(in_channels, 64)
+        self.pool1 = nn.MaxPool2d(2)
+
+        self.down2 = DoubleConv(64, 128)
+        self.pool2 = nn.MaxPool2d(2)
+
+        self.down3 = DoubleConv(128, 256)
+        self.pool3 = nn.MaxPool2d(2)
+
+        self.down4 = DoubleConv(256, 512)
+        self.pool4 = nn.MaxPool2d(2)
+
+        self.bottleneck = DoubleConv(512, 1024)
+
+        self.up4 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
+        self.dec4 = DoubleConv(1024, 512)
+
+        self.up3 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.dec3 = DoubleConv(512, 256)
+
+        self.up2 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec2 = DoubleConv(256, 128)
+
+        self.up1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec1 = DoubleConv(128, 64)
+
+        self.final_conv = nn.Conv2d(64, out_channels, kernel_size=1)
+		```
+
+```python
+def forward(self, x):
+        d1 = self.down1(x)
+        d2 = self.down2(self.pool1(d1))
+        d3 = self.down3(self.pool2(d2))
+        d4 = self.down4(self.pool3(d3))
+
+        bn = self.bottleneck(self.pool4(d4))
+
+        up4 = self.up4(bn)
+        up4 = torch.cat([up4, d4], dim=1)
+        dec4 = self.dec4(up4)
+
+        up3 = self.up3(dec4)
+        up3 = torch.cat([up3, d3], dim=1)
+        dec3 = self.dec3(up3)
+
+        up2 = self.up2(dec3)
+        up2 = torch.cat([up2, d2], dim=1)
+        dec2 = self.dec2(up2)
+
+        up1 = self.up1(dec2)
+        up1 = torch.cat([up1, d1], dim=1)
+        dec1 = self.dec1(up1)
+
+        return self.final_conv(dec1)
+		```
+
+
+
+# When to choose Foundation Models vs Traditional Deep Learning?
+In general, if you have a lot of data and the task is well defined then it is often the case that a traditional deep learning approach will yield better results. However, if you do not have enough data or the task is not well defined then it is often the case that a foundation model will be able to give you better results.
+
+Another factor to consider is the time and resources you have available. If you need to get results quickly and do not have the resources to train a model from scratch then a foundation model is often the best choice. However, if you have the time and resources to train a model from scratch then a traditional deep learning approach will often yield better results.
+
+Finally if you are developing a production system you have to think of the inference time and the resources that you have available. Foundation models are often very large and require a lot of resources to run, which can make them impractical for production systems. In this case, a traditional deep learning approach is often the best choice.
+
+
 
 ## Conclusion
 
 Through this walkthrough you now have now seen how to do Zero Shot Image Segmentation through the usage of the SAM2 model and the GroundedDino model. Not only that but we also explored the potential ways to explore the data and then be able to increase the performance by figuring what are the problems that your implementation has along the way. This is because in the field of ML it is not always the case that you will get the best results form the beginning and as you need to iteratively improve the performance as you find ways of fixing the problems your implementation faces.
 
 Thank you!
+````
